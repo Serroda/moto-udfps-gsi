@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds ScoutUdfpsHbm.apk without Gradle, using the Android SDK
+# Builds MotoUdfpsGsi.apk without Gradle, using the Android SDK
 # command-line tools (aapt2, d8, apksigner).
 #
 # On an aarch64 host the SDK's aapt2 is x86-64, so this script runs it through
@@ -104,12 +104,12 @@ echo "==> sign"
     --v1-signing-enabled false \
     --v2-signing-enabled true \
     --v3-signing-enabled true \
-    --out ScoutUdfpsHbm.apk \
+    --out MotoUdfpsGsi.apk \
     build/unsigned.apk
 
 echo "==> verify"
-"$BUILD_TOOLS/apksigner" verify --verbose --print-certs ScoutUdfpsHbm.apk
+"$BUILD_TOOLS/apksigner" verify --verbose --print-certs MotoUdfpsGsi.apk
 
 echo
-echo "Built: $(pwd)/ScoutUdfpsHbm.apk"
-"${AAPT2[@]}" dump badging ScoutUdfpsHbm.apk | head -5
+echo "Built: $(pwd)/MotoUdfpsGsi.apk"
+"${AAPT2[@]}" dump badging MotoUdfpsGsi.apk | head -5

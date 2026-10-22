@@ -130,11 +130,11 @@ public final class UdfpsHbmModule implements IXposedHookLoadPackage {
     /**
      * AOSP drops pointer events in FingerprintProvider when the vendor HAL
      * advertises SensorProps.halHandlesDisplayTouches. The Motorola Goodix HAL
-     * sets that flag, but its own touch reader is not active under a GSI, so
-     * enrollment never receives a finger-down. Re-dispatch the event to the
-     * current Udfps client when the flag is set; when it is clear, the normal
-     * provider path already dispatched it and doing it again would double the
-     * events.
+     * sets that flag, but its own touch reader is not enough under a GSI, so
+     * authentication and enrollment never receive a finger-down. Re-dispatch
+     * the event to the current authentication or enrollment client when the
+     * flag is set; when it is clear, the normal provider path already
+     * dispatched it and doing it again would double the events.
      */
     private void hookProviderPointer(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
@@ -213,13 +213,19 @@ public final class UdfpsHbmModule implements IXposedHookLoadPackage {
                                 return;
                             }
                             /*
-                             * Only enrollment needs the re-dispatch. Authentication
-                             * is driven by the Goodix HAL's own touch detection and
-                             * re-sending onPointerDown to the auth client duplicates
-                             * FOD events and captures.
+                             * Both authentication and enrollment need the
+                             * re-dispatch on this device. The Goodix HAL's own
+                             * touch reader alone is not enough: authentication
+                             * also needs onPointerDownWithContext to start
+                             * capturing. Limit the re-dispatch to the two AIDL
+                             * clients so unrelated clients are never called.
                              */
-                            if (!client.getClass().getName()
-                                    .contains("FingerprintEnrollClient")) {
+                            String name = client.getClass().getName();
+                            boolean isAuth = name.contains(
+                                    "FingerprintAuthenticationClient");
+                            boolean isEnroll = name.contains(
+                                    "FingerprintEnrollClient");
+                            if (!isAuth && !isEnroll) {
                                 return;
                             }
                             try {

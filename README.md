@@ -1,4 +1,4 @@
-# Scout UDFPS HBM + FOD + Enrollment
+# Moto UDFPS GSI
 
 LSPosed/Vector module for the **Motorola Edge 60 Fusion ("scout")** running a
 crDroid 12.12 GSI (Android 16) with the original Motorola `vendor` partition.
@@ -9,7 +9,8 @@ The module does three things:
 2. **Native Motorola FOD event** (`IMotoFingerPrint.sendFodEvent`) for
    authentication, which is missing on a GSI because the JNI
    `MotBiometricFingerprint.notifyMotFingerprintHal()` does not exist.
-3. **Enrollment fix**: re-dispatches `onPointerDown` / `onPointerUp` to the
+3. **Pointer re-dispatch fix**: re-dispatches `onPointerDown` / `onPointerUp`
+   to the current `FingerprintAuthenticationClient` or
    `FingerprintEnrollClient` when the Goodix HAL advertises
    `halHandlesDisplayTouches = true`, which is what prevents AOSP from
    delivering those events.
@@ -54,10 +55,14 @@ public void onPointerDown(long requestId, int sensorId, PointerContext ctx) {
 
 The Motorola Goodix HAL advertises `halHandlesDisplayTouches = true`, so AOSP
 **drops** `onPointerDown` and never calls
+`FingerprintAuthenticationClient.onPointerDown()` or
 `FingerprintEnrollClient.onPointerDown()`.
 
-On the stock vendor this is fine because the HAL has its own touch reader for
-authentication. Enrollment, however, needs the framework to call:
+On the stock vendor this is fine because Motorola's framework sends the FOD
+event and the HAL's own reader covers authentication. On a GSI, authentication
+also needs the framework to call `onPointerDownWithContext`; without it the HAL
+starts an auth session but never captures. Enrollment needs the framework to
+call:
 
 ```
 FingerprintEnrollClient.onPointerDown(ctx)
@@ -70,6 +75,8 @@ FingerprintEnrollClient.onPointerDown(ctx)
 ```
 
 Without that event the HAL never starts capturing, so progress stays at 0 %.
+Authentication uses the same `onPointerDownWithContext` call to start its
+capture.
 
 ## 2. How the module works
 
@@ -147,7 +154,7 @@ if (biometricPrompt) state |= 8;
 enrollment. Enrollment is fixed by the provider hook (next section), not by
 sending `sendFodEvent` or `sendCommand`.
 
-### 2.3 Enrollment fix (system_server)
+### 2.3 Pointer re-dispatch fix (system_server)
 
 `UdfpsHbmModule.hookProviderPointer()` hooks **after** the original method:
 
@@ -167,8 +174,9 @@ The `after` hook runs even when the original method returned early because of
    it again would duplicate it.
 5. If it is `true`, get the scheduler and call
    `getCurrentClientIfMatches(requestId, consumer)`.
-6. In the `consumer`, if the client is a `FingerprintEnrollClient`, call
-   `client.onPointerDown(pointerContext)` or `onPointerUp(pointerContext)`.
+6. In the `consumer`, if the client is a `FingerprintAuthenticationClient` or
+   a `FingerprintEnrollClient`, call `client.onPointerDown(pointerContext)` or
+   `onPointerUp(pointerContext)`.
 
 This reproduces exactly what AOSP would have done if the HAL flag were `false`.
 
@@ -181,25 +189,28 @@ if (!halHandles) return;
 
 scheduler.getCurrentClientIfMatches(requestId, client -> {
     if (client == null) return;
-    if (!client.getClass().getName().contains("FingerprintEnrollClient")) {
-        return; // do not touch authentication
-    }
+    String name = client.getClass().getName();
+    boolean isAuth = name.contains("FingerprintAuthenticationClient");
+    boolean isEnroll = name.contains("FingerprintEnrollClient");
+    if (!isAuth && !isEnroll) return;
     client.onPointerDown(pointerContext); // or onPointerUp
 });
 ```
 
-The `FingerprintEnrollClient` filter is important: without it, the module also
-re-dispatched touches to the `FingerprintAuthenticationClient`, duplicating FOD
-events and captures during normal unlock. Authentication is already handled by
-the Goodix HAL's own touch reader; the module must only intervene in
-enrollment.
+The re-dispatch is limited to the authentication and enrollment clients so
+unrelated clients are not called. Both are required on this device:
+authentication also needs `onPointerDownWithContext`; the HAL's own touch
+reader alone does not start the capture. A build that only re-dispatched to
+`FingerprintEnrollClient` left authentication broken: the framework started
+auth sessions, but they ended with `wasSuccessful=false` and the HAL captured
+nothing.
 
 ---
 
 ## 3. HAL chain evidence
 
 Before the fix, uprobes in the HAL service received no calls during an
-enrollment touch:
+enrollment or authentication touch:
 
 ```
 0xd200  onPointerDownWithContext (impl)
@@ -224,6 +235,17 @@ BiometricScheduler: [Finishing] {FingerprintEnrollClient, requestId=1}, success:
 
 `cmd=241` is `0xf1`, the command that triggers `EventCenter` event 2 and ends in
 `onEnrollDownEvt`.
+
+Authentication uses the same provider re-dispatch and the same
+`onPointerDownWithContext` session call:
+
+```
+ScoutUdfpsHbm: pointer down requestId=3 sensor=5 halHandlesDisplayTouches=true
+ScoutUdfpsHbm: pointer down -> ...FingerprintAuthenticationClient
+
+GF_AIDL.Engine: onPointerDownImpl out session state:2 p:0, x:..., y:...
+AuthSessionCoordinator: authEndedFor(... wasSuccessful=true)
+```
 
 Final verification:
 
@@ -260,7 +282,7 @@ adb shell service list | grep -iE \
 ## 5. Installation and scope
 
 ```bash
-adb install --no-incremental -r ScoutUdfpsHbm.apk
+adb install --no-incremental -r MotoUdfpsGsi.apk
 ```
 
 `--no-incremental` avoids the problem where the APK is not readable by the
@@ -268,7 +290,7 @@ Vector daemon during the first boot (see section 7).
 
 In Vector/LSPosed:
 
-1. **Modules** → `Scout UDFPS HBM` → enable.
+1. **Modules** → `Moto UDFPS GSI` → enable.
 2. **Scope**:
    - **System UI** (`com.android.systemui`) → HBM and FOD event from SystemUI.
    - **System Framework** (`android`) → `FingerprintProvider` hook in
@@ -338,7 +360,7 @@ Dependencies:
   the same signature.
 
 The script uses `javac --release 8`, `d8 --min-api 29`, `aapt2`, and `apksigner`
-(v3). The output is `ScoutUdfpsHbm.apk`.
+(v3). The output is `MotoUdfpsGsi.apk`.
 
 If the host is aarch64 and `aapt2` is x86-64, the script runs it through
 `qemu-x86_64` with a sysroot at `X86_64_ROOT` (default `/root/x86_64-root`). On
@@ -426,11 +448,14 @@ ScoutUdfpsHbm: pointer up requestId=1 sensor=5 halHandlesDisplayTouches=true
 ScoutUdfpsHbm: pointer up -> ...FingerprintEnrollClient
 ```
 
-During authentication, with the final guard, only the provider log appears and
-the event is **not** re-dispatched to `FingerprintAuthenticationClient`:
+During authentication you should also see the re-dispatch, now to
+`FingerprintAuthenticationClient`:
 
 ```
 ScoutUdfpsHbm: pointer down requestId=3 sensor=5 halHandlesDisplayTouches=true
+ScoutUdfpsHbm: pointer down -> ...FingerprintAuthenticationClient
+ScoutUdfpsHbm: pointer up requestId=3 sensor=5 halHandlesDisplayTouches=true
+ScoutUdfpsHbm: pointer up -> ...FingerprintAuthenticationClient
 ```
 
 ### 8.2 HAL logs
@@ -498,10 +523,10 @@ HAL.
 
 The touch `requestId` does not match the scheduler's current client. This
 usually happens after enrollment has finished or when the overlay is in a
-different state. Check that `FingerprintEnrollClient` is active:
+different state. Check which client is current:
 
 ```bash
-adb logcat | grep -E 'FingerprintEnrollClient|BiometricScheduler'
+adb logcat | grep -E 'FingerprintAuthenticationClient|FingerprintEnrollClient|BiometricScheduler'
 ```
 
 ### Enrollment stays at 0 %
@@ -524,18 +549,22 @@ It is not the FOD event. Enrollment does not use `sendFodEvent` or
 `sendCommand`. The cause is the `FingerprintProvider` early return due to
 `halHandlesDisplayTouches = true`; apply the provider hook.
 
-### FOD events or captures are duplicated during authentication
+### Authentication fails but enrollment works
 
-The module must re-dispatch only to `FingerprintEnrollClient`. Check that the
-installed build includes the guard:
+Check that the provider re-dispatch allows both clients:
 
 ```java
-if (!client.getClass().getName().contains("FingerprintEnrollClient")) {
+String name = client.getClass().getName();
+boolean isAuth = name.contains("FingerprintAuthenticationClient");
+boolean isEnroll = name.contains("FingerprintEnrollClient");
+if (!isAuth && !isEnroll) {
     return;
 }
 ```
 
-If your build is older, rebuild, reinstall, and reboot.
+If the installed build only allows `FingerprintEnrollClient`, authentication
+sessions start but end with `wasSuccessful=false` and the HAL captures nothing.
+Rebuild, reinstall, and reboot.
 
 ### `setIgnoreDisplayTouches set to false/true`
 
@@ -568,9 +597,10 @@ active; turning the screen off and on usually recovers the panel.
 - **Requires root and LSPosed/Vector**. It cannot be installed on a GSI without
   root.
 - **Not for the stock ROM**: it would duplicate HBM and FOD events.
-- **Enrollment only**: pointer re-dispatch is limited to
-  `FingerprintEnrollClient`; authentication still works through the HAL's own
-  touch reader.
+- **Pointer re-dispatch covers authentication and enrollment**: it is limited
+  to `FingerprintAuthenticationClient` and `FingerprintEnrollClient`.
+  Authentication on this device also needs `onPointerDownWithContext`; the
+  HAL's own touch reader alone is not enough.
 - **The panel can stay in mode 4** if SystemUI dies while HBM is on; the
   5-second timeout does not run if the process dies.
 - **It does not hook SurfaceFlinger or the HAL**: if `IDisplayPanel` does not
@@ -578,10 +608,8 @@ active; turning the screen off and on usually recovers the panel.
 - **It does not reproduce all of `PanelsService`**: the stock flow also adjusts
   refresh rate, SVI, DC dimming, and color mode before `setMode(4)`. This module
   only performs the final call.
-- **The APK in this folder includes the final guard** (enrollment only). The
-  build validated on the device during development was the one before the
-  guard; enrollment behavior is the same. To apply the guard, reinstall the APK
-  and reboot.
+- **Version 1.2** re-dispatches to both authentication and enrollment. Version
+  1.1 only allowed enrollment, which broke authentication on this device.
 
 ---
 

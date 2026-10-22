@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.scout.udfpshbm"
-    android:versionCode="2"
-    android:versionName="1.1">
+    android:versionCode="3"
+    android:versionName="1.2">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36" />
 
     <application
         android:allowBackup="false"
         android:hasCode="true"
-        android:label="Scout UDFPS HBM"
+        android:label="Moto UDFPS GSI"
         android:supportsRtl="true">
 
         <meta-data
@@ -17,7 +17,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Motorola panel HBM and native FOD event for UDFPS on Scout (GSI)." />
+            android:value="Motorola panel HBM, native FOD event and UDFPS pointer fix for GSIs." />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
