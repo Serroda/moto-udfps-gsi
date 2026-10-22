@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="xposedscope">
+        <!-- SystemUI (platform_app): Motorola panel HBM. -->
+        <item>com.android.systemui</item>
+
+        <!-- system_server: reproduces the native FOD event that the Motorola
+             framework sends before onPointerDownWithContext(), and acts as a
+             fallback for the panel if platform_app cannot call it. -->
+        <item>android</item>
+    </string-array>
+</resources>
