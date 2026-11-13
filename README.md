@@ -19,6 +19,11 @@ Status: **tested on a real device; enrollment completes and the fingerprint is
 stored** (`dumpsys fingerprint` shows `count: 1`, and the scheduler finishes with
 `success: true`).
 
+The module is implemented with the **modern libxposed API**
+(`io.github.libxposed:api:102.0.0`, `targetApiVersion=102`), so it requires
+Vector 2.2 or newer and no longer uses the legacy `de.robv.android.xposed`
+classes.
+
 ---
 
 ## 1. The problem
@@ -262,8 +267,10 @@ adb shell dumpsys fingerprint
 - Tested with Motorola Edge 60 Fusion `scout` but you can try with other modern Motorola devices.
 - GSI/prebuilt Android 16 (tested with crDroid 12.12) with the Motorola
   `vendor` partition **intact**, [crDroid Doze-off](https://github.com/Doze-off/crdroid_gsi_treble).
-- Root (KernelSU/Magisk) and **Vector 2.2** (or an LSPosed build compatible with
-  Android 16).
+- Root (KernelSU/Magisk) and **Vector 2.2 or newer**. Vector 2.2 is the first
+  stable release that implements **libxposed API 102**, which this module
+  targets (`module.prop`). The original LSPosed 1.9.x and Vector 2.0/2.1 do not
+  support it.
 - Vendor services present:
   - `com.motorola.hardware.display.panel.IDisplayPanel/default`
   - `com.motorola.hardware.biometric.fingerprint.IMotoFingerPrint/default`
@@ -293,31 +300,32 @@ In Vector/LSPosed:
 1. **Modules** → `Moto UDFPS GSI` → enable.
 2. **Scope**:
    - **System UI** (`com.android.systemui`) → HBM and FOD event from SystemUI.
-   - **System Framework** (`android`) → `FingerprintProvider` hook in
+   - **System Framework** (`system`) → `FingerprintProvider` hook in
      `system_server`.
 3. Reboot the device (the `system_server` hook is installed only at boot;
    killing SystemUI is not enough).
 
-The manifest already declares both scopes:
+The modern API declares the scope in `META-INF/xposed/scope.list`; the manifest
+no longer carries `xposedscope` metadata:
 
-```xml
-<string-array name="xposedscope">
-    <item>com.android.systemui</item>
-    <item>android</item>
-</string-array>
+```
+com.android.systemui
+system
 ```
 
-In Vector's database the `system_server` scope appears as `system` (not
-`android`):
+`system` is a special virtual package name for `system_server`; `android` is the
+separate `android` package (chooser/resolver activities). In Vector's database
+the `system_server` scope is stored as `system`:
 
 ```
 147|com.android.systemui|0
 147|system|0
 ```
 
-That is expected: the UI shows it as **System Framework**, and the module
-receives `packageName = "android"`. Do not change the module condition to
-`system`; that was exactly the bug.
+That is expected: the UI shows it as **System Framework**, the framework calls
+`onSystemServerStarting()`, and the module no longer relies on receiving
+`packageName = "android"`. Do not replace `system` with `android`: `android`
+does not inject into `system_server`.
 
 Scope check via CLI:
 
@@ -338,7 +346,7 @@ The APK is built without Gradle, using the SDK command-line tools:
 
 ```bash
 PLATFORM=~/Android/Sdk/platforms/android-37.0/android.jar \
-XPOSED_API=~/Android/Sdk/api-82.jar \
+LIBXPOSED_API=~/Android/Sdk/libxposed/api-102.0.0.jar \
 HIDDEN_API=~/Android/Sdk/hiddenapibypass/classes.jar \
 BUILD_TOOLS=~/Android/Sdk/build-tools/36.0.0 \
 ./build.sh
@@ -351,9 +359,12 @@ Dependencies:
 
 - **build-tools 36.0.0**: `aapt2`, `d8`, `apksigner`.
 - **platform android-37**: `android.jar` to compile against Android 16/17.
-- **`api-82.jar`**: stubs for the legacy Xposed API
-  (`de.robv.android.xposed.*`). At runtime Vector provides the implementation;
-  the APK does **not** bundle those classes.
+- **libxposed API `102.0.0`** (`LIBXPOSED_API`): compile-time stubs for
+  `io.github.libxposed.api.*`. Maven Central only publishes an AAR, so
+  `build.sh` extracts `classes.jar` from it. If the file is missing, the script
+  downloads and extracts it automatically. At runtime Vector provides the
+  implementation; the APK does **not** bundle those classes. The legacy
+  `api-82.jar` is no longer used.
 - **HiddenApiBypass 6.1** (`classes.jar`): bundled into the DEX so the module can
   call `ServiceManager.getService()` and access hidden framework fields.
 - **`debug.keystore`**: debug signing key; kept outside `build/` so updates keep
@@ -362,64 +373,75 @@ Dependencies:
 The script uses `javac --release 8`, `d8 --min-api 29`, `aapt2`, and `apksigner`
 (v3). The output is `MotoUdfpsGsi.apk`.
 
+Modern module descriptors are kept in `resources/META-INF/xposed/` and added to
+the APK root after `aapt2 link` (aapt2 only copies `assets/`):
+
+```
+resources/META-INF/xposed/java_init.list  ->  dev.scout.udfpshbm.UdfpsHbmModule
+resources/META-INF/xposed/module.prop     ->  minApiVersion=101, targetApiVersion=102
+resources/META-INF/xposed/scope.list      ->  com.android.systemui, system
+```
+
 If the host is aarch64 and `aapt2` is x86-64, the script runs it through
 `qemu-x86_64` with a sysroot at `X86_64_ROOT` (default `/root/x86_64-root`). On
 the x86-64 host used for this build that is not needed.
 
 ---
 
-## 7. The `system_server` loading issue (Vector legacy)
+## 7. Module loading (modern libxposed API)
 
-The module is a **legacy** Xposed module:
+The module is a **modern libxposed module**:
 
 ```
-assets/xposed_init  ->  dev.scout.udfpshbm.UdfpsHbmModule
+META-INF/xposed/java_init.list  ->  dev.scout.udfpshbm.UdfpsHbmModule
+META-INF/xposed/module.prop     ->  minApiVersion=101, targetApiVersion=102
+META-INF/xposed/scope.list      ->  com.android.systemui, system
 ```
 
-Vector loads it through `VectorLegacyBridge` in both SystemUI and
-`system_server`. On the first boot after installing the APK we saw:
+There is no `assets/xposed_init` and no `xposedmodule`/`xposedscope` metadata.
+The framework instantiates the entry class and calls `onModuleLoaded()`,
+`onPackageLoaded()` for SystemUI, and `onSystemServerStarting()` for
+`system_server` (the first package callback is replaced by
+`onSystemServerStarting()` in the system server).
+
+If the APK is installed in incremental mode, the Vector daemon can start before
+PackageManager finishes scanning and fail to read it on the first boot:
 
 ```
 W/VectorConfigCache: PackageParser failed for .../dev.scout.udfpshbm.../base.apk
 E/vectord: Failed to open APK ...: I/O error
 ```
 
-The Vector daemon starts before PackageManager finishes scanning, and the APK
-(installed in incremental mode) was not yet readable by the daemon. Because
-`system_server` requests the list of legacy modules only once at boot, the
-module was not loaded there; SystemUI, which starts a few seconds later, did
-load it.
-
-Symptoms:
-
-- In SystemUI: `SystemUI hooks installed`.
-- In `system_server`: **nothing**; no `Loading legacy module
-dev.scout.udfpshbm` line in `/data/adb/lspd/log/modules_*.log`.
-- `handleLoadPackage` is only seen for `com.android.systemui`.
-
-Solution:
+On the first boot after installing the APK we saw the module load in SystemUI
+but not in `system_server`. Solution:
 
 1. Install with `adb install --no-incremental -r`.
 2. Reboot.
 3. Verify that the module log shows the load in the `system_server` PID:
 
 ```bash
-adb shell 'grep -E "Loading legacy module dev.scout.udfpshbm|ScoutUdfpsHbm" \
-  /data/adb/lspd/log/modules_*.log | tail -20'
+adb shell 'grep -E "ScoutUdfpsHbm" /data/adb/lspd/log/modules_*.log | tail -20'
 ```
 
 Expected output:
 
 ```
-[ ... 3522: 3522 V/VectorLegacyBridge ] Loading legacy module dev.scout.udfpshbm from ...
-[ ... 3522: 3522 V/VectorLegacyBridge ]   Loading class dev.scout.udfpshbm.UdfpsHbmModule
-[ ... 3522: 3522 I/VectorLegacyBridge ] ScoutUdfpsHbm: handleLoadPackage package=android process=android
-[ ... 3522: 3522 I/VectorLegacyBridge ] ScoutUdfpsHbm: FingerprintProvider pointer hooks installed
-[ ... 3522: 3522 I/VectorLegacyBridge ] ScoutUdfpsHbm: system_server hooks installed
+[ ... 3522: 3522 I/ScoutUdfpsHbm ] module loaded process=system systemServer=true framework=... api=102
+[ ... 3522: 3522 I/ScoutUdfpsHbm ] : FingerprintProvider pointer hooks installed
+[ ... 3522: 3522 I/ScoutUdfpsHbm ] : system_server hooks installed
 ```
 
-If only the SystemUI PID appears, the module is not in the `system_server`
-scope or the APK was not readable at boot. Check the scope and reboot again.
+In SystemUI the same log shows:
+
+```
+[ ... 4001: 4001 I/ScoutUdfpsHbm ] module loaded process=com.android.systemui systemServer=false framework=... api=102
+[ ... 4001: 4001 I/ScoutUdfpsHbm ] package loaded package=com.android.systemui
+[ ... 4001: 4001 I/ScoutUdfpsHbm ] : SystemUI hooks installed (HBM); scope System Framework too for FOD
+```
+
+If only the SystemUI PID appears, the module is not in the `system` scope, the
+framework is older than API 102, or the APK was not readable at boot. Check the
+scope and reboot again.
 
 ---
 
@@ -427,7 +449,7 @@ scope or the APK was not readable at boot. Check the scope and reboot again.
 
 ### 8.1 Module logs
 
-`XposedBridge.log()` writes to the Vector log, not logcat:
+`log()` from the libxposed API writes to the Vector log, not logcat:
 
 ```bash
 adb shell 'tail -f /data/adb/lspd/log/modules_*.log' | grep ScoutUdfpsHbm
@@ -499,18 +521,37 @@ BiometricScheduler: [Finishing] {FingerprintEnrollClient, requestId=1}, success:
 
 ### The module loads in SystemUI but not in system_server
 
-- Check the scope: **System Framework** must be enabled.
+- Check the scope: **System Framework** must be enabled. In the modern API it is
+  the special scope `system`, not `android`.
+- Check that the module is modern and recognized by Vector 2.2+ (it needs
+  `META-INF/xposed/module.prop` with `targetApiVersion=102`).
 - Check that the APK is readable:
 
   ```bash
   adb shell 'ls -l $(pm path dev.scout.udfpshbm | cut -d: -f2)'
   ```
 
-- Look for `Loading legacy module dev.scout.udfpshbm` in
+- Look for `module loaded process=system systemServer=true` in
   `/data/adb/lspd/log/modules_*.log`. If it is missing, `system_server` did not
   receive the module.
 - Reinstall with `--no-incremental` and reboot.
-- Do not filter on `processName == "system"`: on this ROM it is `"android"`.
+- If the framework is older than libxposed API 102 (for example LSPosed 1.9.x,
+  Vector 2.0 or 2.1), the module cannot load at all. Update to Vector 2.2+.
+
+### Module not listed in Vector
+
+- Verify that the APK contains `META-INF/xposed/java_init.list`,
+  `module.prop` and `scope.list`:
+
+  ```bash
+  unzip -l MotoUdfpsGsi.apk META-INF/xposed/*
+  ```
+
+- The entry class must extend `io.github.libxposed.api.XposedModule` and have a
+  public no-argument constructor.
+- Do not add legacy `xposedmodule`/`xposedscope` metadata or
+  `assets/xposed_init`: this module targets API 102, where the legacy API is not
+  available.
 
 ### `halHandlesDisplayTouches=false`
 
@@ -594,8 +635,8 @@ active; turning the screen off and on usually recovers the panel.
   12.12 GSI (Android 16), stock Motorola vendor, Vector 2.2 (versionCode 3080).
   Other vendors/versions may change signatures, offsets, or the
   `halHandlesDisplayTouches` flag.
-- **Requires root and LSPosed/Vector**. It cannot be installed on a GSI without
-  root.
+- **Requires root and Vector 2.2+**. It cannot be installed on a GSI without
+  root, and it does not load on frameworks that lack libxposed API 102 support.
 - **Not for the stock ROM**: it would duplicate HBM and FOD events.
 - **Pointer re-dispatch covers authentication and enrollment**: it is limited
   to `FingerprintAuthenticationClient` and `FingerprintEnrollClient`.
@@ -608,8 +649,11 @@ active; turning the screen off and on usually recovers the panel.
 - **It does not reproduce all of `PanelsService`**: the stock flow also adjusts
   refresh rate, SVI, DC dimming, and color mode before `setMode(4)`. This module
   only performs the final call.
-- **Version 1.2** re-dispatches to both authentication and enrollment. Version
-  1.1 only allowed enrollment, which broke authentication on this device.
+- **Version 2.0** migrates from the legacy `de.robv.android.xposed` API to the
+  modern libxposed API 102 (no functional change) and uses the `system` scope
+  for `system_server`. Versions up to 1.2 were legacy modules scoped to
+  `android`. Version 1.1 only allowed enrollment re-dispatch, which broke
+  authentication on this device.
 
 ---
 

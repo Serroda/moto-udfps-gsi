@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.scout.udfpshbm"
-    android:versionCode="3"
-    android:versionName="1.2">
+    android:versionCode="5"
+    android:versionName="2.0">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36" />
 
@@ -10,19 +10,12 @@
         android:allowBackup="false"
         android:hasCode="true"
         android:label="Moto UDFPS GSI"
-        android:supportsRtl="true">
+        android:description="@string/xposeddescription"
+        android:supportsRtl="true" />
 
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="Motorola panel HBM, native FOD event and UDFPS pointer fix for GSIs." />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="93" />
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/xposedscope" />
-    </application>
+    <!--
+        Modern libxposed module: the entry point, scope and API level live in
+        META-INF/xposed/ (java_init.list, scope.list, module.prop). No legacy
+        xposedmodule/xposedscope meta-data is used.
+    -->
 </manifest>

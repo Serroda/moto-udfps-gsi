@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="xposeddescription">Motorola panel HBM, native FOD event and UDFPS pointer fix for GSIs.</string>
+</resources>

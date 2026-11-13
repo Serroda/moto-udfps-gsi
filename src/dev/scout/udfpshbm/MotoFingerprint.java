@@ -8,8 +8,6 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass;
 
 import java.lang.reflect.Method;
 
-import de.robv.android.xposed.XposedBridge;
-
 /**
  * Client for Motorola's IMotoFingerPrint AIDL service.
  *
@@ -112,7 +110,7 @@ final class MotoFingerprint {
                     downFlags(interactive, onTap, biometricPrompt));
         } catch (Throwable t) {
             Log.e(TAG, "sendFodEvent(FINGER_DOWN) failed", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
         }
     }
 
@@ -140,7 +138,7 @@ final class MotoFingerprint {
             sendFodEvent(EVENT_FINGER_UP, NO_FLAGS);
         } catch (Throwable t) {
             Log.e(TAG, "sendFodEvent(FINGER_UP) failed", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
         }
     }
 
@@ -149,7 +147,7 @@ final class MotoFingerprint {
             sendFodEvent(EVENT_CANCEL, NO_FLAGS);
         } catch (Throwable t) {
             Log.e(TAG, "sendFodEvent(CANCEL) failed", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
         }
     }
 
@@ -162,7 +160,7 @@ final class MotoFingerprint {
             return sendCommand(cmdId, data);
         } catch (Throwable t) {
             Log.e(TAG, "sendCommand(" + cmdId + ") failed", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
             return -1;
         }
     }
@@ -253,12 +251,12 @@ final class MotoFingerprint {
             if (sBinder == null && !sMissingLogged) {
                 sMissingLogged = true;
                 Log.e(TAG, "Motorola fingerprint service not found: " + INSTANCE);
-                XposedBridge.log(TAG + ": fingerprint service not found");
+                ModuleLog.e("fingerprint service not found");
             }
         } catch (Throwable t) {
             sBinder = null;
             Log.e(TAG, "Cannot get Motorola fingerprint service", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
         }
         return sBinder;
     }

@@ -10,8 +10,6 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass;
 
 import java.lang.reflect.Method;
 
-import de.robv.android.xposed.XposedBridge;
-
 /**
  * Client for Motorola's IDisplayPanel AIDL service.
  *
@@ -125,12 +123,12 @@ final class PanelHbm {
             if (sBinder == null && !sMissingLogged) {
                 sMissingLogged = true;
                 Log.e(TAG, "Panel service not found: " + INSTANCE);
-                XposedBridge.log(TAG + ": panel service not found");
+                ModuleLog.e("panel service not found");
             }
         } catch (Throwable t) {
             sBinder = null;
             Log.e(TAG, "Cannot get panel service", t);
-            XposedBridge.log(t);
+            ModuleLog.log(t);
         }
         return sBinder;
     }
